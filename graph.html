@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>IoT Dashboard - Graphs</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+body { font-family: Arial, sans-serif; background: #e8f5e9; margin:0; padding:20px; }
+h1 { color: #1b5e20; }
+h2 { margin-top:40px; color: #2e7d32; }
+
+canvas {
+  background:white;
+  padding:20px;
+  border-radius:12px;
+  margin-top:30px;
+  box-shadow:0 4px 10px rgba(0,0,0,0.1);
+}
+
+button {
+  background-color: #2e7d32;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  cursor:pointer;
+  font-size:16px;
+  margin-bottom:20px;
+}
+button:hover { background-color:#1b5e20; }
+</style>
+</head>
+<body>
+
+<h1>IoT Environmental Monitoring - Graphs</h1>
+<button onclick="location.href='index.html'">Back to Live Data</button>
+
+<canvas id="tempChart"></canvas>
+<canvas id="presChart"></canvas>
+<canvas id="humChart"></canvas>
+<canvas id="waterChart"></canvas>
+
+<script>
+// SAME SCRIPT AS BEFORE FOR FETCHING + CHARTS
+const CHANNEL_ID = "3217594";
+const READ_API_KEY = "5PEGJNOBO8DC3RRS";
+const RESULTS = 1500;
+const RAW_MIN = 0, RAW_MAX = 300;
+const DISPLAY_MIN = 175, DISPLAY_MAX = 210;
+
+function exponentialSmooth(data, alpha=0.1) {
+  const smoothed=[];
+  let last=data[0];
+  smoothed.push(Number(last.toFixed(2)));
+  for(let i=1;i<data.length;i++){
+    last=alpha*data[i]+(1-alpha)*last;
+    smoothed.push(Number(last.toFixed(2)));
+  }
+  return smoothed;
+}
+
+function updateGraphs(){
+  fetch(`https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds.json?api_key=${READ_API_KEY}&results=${RESULTS}`)
+  .then(res=>res.json())
+  .then(data=>{
+    const feeds=data.feeds.filter(f=>f.field1&&f.field2&&f.field3&&f.field4);
+    const temp=feeds.map(f=>parseFloat(f.field1));
+    const pres=feeds.map(f=>parseFloat(f.field2));
+    const hum=feeds.map(f=>parseFloat(f.field3));
+    const water=feeds.map(f=>{
+      const raw=parseFloat(f.field4);
+      const norm=DISPLAY_MIN + ((raw-RAW_MIN)*(DISPLAY_MAX-DISPLAY_MIN))/(RAW_MAX-RAW_MIN);
+      return Math.min(DISPLAY_MAX, Math.max(DISPLAY_MIN, Number(norm.toFixed(2))));
+    });
+    const labels=feeds.map(f=>new Date(f.created_at));
+
+    function drawChart(canvasId,label,dataArr,smooth=false){
+      const chartData=smooth?exponentialSmooth(dataArr,0.1):dataArr;
+      const minVal=Math.min(...dataArr);
+      const maxVal=Math.max(...dataArr);
+      const avgVal=(dataArr.reduce((a,b)=>a+b,0)/dataArr.length).toFixed(2);
+      new Chart(document.getElementById(canvasId),{
+        type:'line',
+        data:{labels:labels.map(d=>d.toLocaleString()),
+              datasets:[
+                {label:label,data:chartData,borderWidth:2,fill:false,tension:smooth?0.4:0},
+                {label:'Min',data:Array(dataArr.length).fill(minVal),borderDash:[5,5],fill:false},
+                {label:'Max',data:Array(dataArr.length).fill(maxVal),borderDash:[5,5],fill:false},
+                {label:'Avg',data:Array(dataArr.length).fill(avgVal),borderDash:[5,5],fill:false}
+              ]}});
+    }
+
+    drawChart("tempChart","Temperature (°C)",temp);
+    drawChart("presChart","Pressure (hPa)",pres);
+    drawChart("humChart","Humidity (%)",hum);
+    drawChart("waterChart","Water Level (cm)",water,true);
+  });
+}
+
+updateGraphs();
+setInterval(updateGraphs,600000);
+</script>
+
+</body>
+</html>
